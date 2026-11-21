@@ -264,6 +264,72 @@
     return { text: t, fixes: fixes };
   }
 
+  // ---- paste: keep bold and lists ----
+
+  function escapeHtml(s) {
+    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  // markdown-lite for plain-text pastes: **bold** or *bold* stays bold,
+  // lines starting with "- " stay a bullet list
+  function inlineMd(escaped) {
+    return escaped
+      .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+      .replace(/\*([^\s*][^*]*)\*/g, "<strong>$1</strong>");
+  }
+
+  function plainToHtml(text) {
+    var lines = text.replace(/\r\n?/g, "\n").split("\n");
+    var html = "";
+    var inList = false;
+    lines.forEach(function (line) {
+      var m = line.match(/^\s*[-•]\s+(.*)$/);
+      if (m) {
+        if (!inList) { html += "<ul>"; inList = true; }
+        html += "<li>" + inlineMd(escapeHtml(m[1])) + "</li>";
+      } else {
+        if (inList) { html += "</ul>"; inList = false; }
+        var content = inlineMd(escapeHtml(line));
+        html += content ? "<div>" + content + "</div>" : "<div><br></div>";
+      }
+    });
+    if (inList) html += "</ul>";
+    return html;
+  }
+
+  // rich pastes (docs, web pages, mail): keep simple formatting, drop the rest
+  var KEEP = { B: "strong", STRONG: "strong", I: "em", EM: "em", U: "u",
+               UL: "ul", OL: "ol", LI: "li", BR: "br", P: "div", DIV: "div", SPAN: "span" };
+
+  function cleanHtml(node) {
+    var out = "";
+    for (var i = 0; i < node.childNodes.length; i++) {
+      var n = node.childNodes[i];
+      if (n.nodeType === 3) { out += escapeHtml(n.nodeValue); continue; }
+      if (n.nodeType !== 1) continue;
+      var tag = n.tagName;
+      if (tag === "SCRIPT" || tag === "STYLE" || tag === "HEAD" || tag === "META" || tag === "LINK") continue;
+      if (/^H[1-6]$/.test(tag)) { out += "<div><strong>" + cleanHtml(n) + "</strong></div>"; continue; }
+      var inner = cleanHtml(n);
+      if (KEEP[tag]) {
+        var t = KEEP[tag];
+        out += t === "br" ? "<br>" : "<" + t + ">" + inner + "</" + t + ">";
+      } else if (tag === "TD" || tag === "TH") {
+        out += inner + " ";
+      } else if (tag === "TR") {
+        out += "<div>" + inner + "</div>";
+      } else {
+        out += inner; // unwrap anything else, keep its text
+      }
+    }
+    return out;
+  }
+
+  function sanitizeHtml(html) {
+    var doc = new DOMParser().parseFromString(html, "text/html");
+    return cleanHtml(doc.body);
+  }
+
   // ---- UI ----
   var input = document.getElementById("input");
   var output = document.getElementById("output");
@@ -276,6 +342,15 @@
     if (!input.textContent.replace(/\u00a0/g, "").trim() && !input.querySelector("ul, ol")) {
       input.innerHTML = "";
     }
+  });
+
+  input.addEventListener("paste", function (e) {
+    e.preventDefault();
+    var cd = e.clipboardData || window.clipboardData;
+    if (!cd) return;
+    var html = cd.getData("text/html");
+    var clean = html ? sanitizeHtml(html) : plainToHtml(cd.getData("text/plain") || "");
+    if (clean) document.execCommand("insertHTML", false, clean);
   });
 
   function run() {
