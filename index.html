@@ -255,6 +255,58 @@
     return { text: t, fixes: fixes };
   }
 
+  // ---- UI ----
+  var input = document.getElementById("input");
+  var output = document.getElementById("output");
+  var outCard = document.getElementById("out-card");
+  var status = document.getElementById("status");
+
+  function run() {
+    var raw = input.value;
+    if (!raw.trim()) {
+      outCard.classList.remove("show");
+      return;
+    }
+    var res = fixText(raw);
+    output.textContent = res.text;
+    outCard.classList.add("show");
+    status.className = "";
+    status.textContent = res.fixes === 0 ? "already clean, no fixes needed" : res.fixes + (res.fixes === 1 ? " fix" : " fixes");
+    outCard.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+
+  document.getElementById("fixBtn").addEventListener("click", run);
+  document.getElementById("clearBtn").addEventListener("click", function () {
+    input.value = "";
+    outCard.classList.remove("show");
+    input.focus();
+  });
+  document.getElementById("copyBtn").addEventListener("click", function () {
+    var text = output.textContent;
+    function done() {
+      status.className = "ok";
+      status.textContent = "copied ✓";
+      setTimeout(function () { status.className = ""; }, 1800);
+    }
+    function fallback() {
+      var ta = document.createElement("textarea");
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+      done();
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done, fallback);
+    } else { fallback(); }
+  });
+
+  // demo mode for screenshots: open with #demo
+  if (location.hash === "#demo") {
+    input.value = "the thing is   it seems good ,but i dont actually fw it.tbh the wifi framing is exactly right ,and the the site you open on every new network is the pitch .did you mean airport btw? go to site.com and see a apple a hour later";
+    run();
+  }
 })();
 </script>
 </body>
