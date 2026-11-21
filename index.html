@@ -14,6 +14,28 @@
     <h1>tidied<span class="dot">.</span></h1>
     <p>paste your text. get clean punctuation, capitalization &amp; grammar back. your words are never changed.</p>
   </header>
+
+  <div class="card">
+    <textarea id="input" placeholder="paste your text here…" autofocus></textarea>
+    <div class="row">
+      <button class="fix" id="fixBtn">Fix text</button>
+      <button class="ghost" id="clearBtn">Clear</button>
+    </div>
+  </div>
+
+  <div class="card" id="out-card">
+    <div class="out-label">fixed text</div>
+    <div id="output"></div>
+    <div class="row">
+      <button class="ghost" id="copyBtn">Copy</button>
+      <div id="status"></div>
+    </div>
+  </div>
+
+  <footer>
+    fixes spacing, punctuation, capitalization and safe grammar slips (a/an, doubled words, missing apostrophes).<br>
+    it never rewords, rewrites or swaps your vocabulary. runs fully offline, nothing leaves this page.
+  </footer>
 </div>
 
 <script>
