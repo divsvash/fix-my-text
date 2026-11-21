@@ -179,7 +179,8 @@
     return repl;
   }
 
-  function fixText(input) {
+  // fix one run of text; capStart means this piece starts a line or sentence
+  function fixInline(input, capStart) {
     var fixes = 0;
     var t = input.replace(/\r\n?/g, "\n");
 
@@ -225,11 +226,19 @@
     // 8. standalone lowercase i -> I
     t = t.replace(/(^|[\s("'])i(?=[\s,.!?'")]|$)/gm, function (m, pre) { fixes++; return pre + "I"; });
 
-    // 9. capitalize first letter of each sentence / line
-    t = t.replace(/(^|[.!?…]\s+|\n+)(\(?["']?)([a-z])/g, function (m, pre, q, ch) {
+    // 9. capitalize after sentence-ending punctuation
+    t = t.replace(/([.!?…]\s+)(\(?["']?)([a-z])/g, function (m, pre, q, ch) {
       fixes++;
       return pre + q + ch.toUpperCase();
     });
+    // 9a. capitalize the start of a line: bold and list markup split text
+    // into pieces, so the caller tells us where lines start
+    if (capStart) {
+      t = t.replace(/^(\s*)(\(?["']?)([a-z])/, function (m, sp, q, ch) {
+        fixes++;
+        return sp + q + ch.toUpperCase();
+      });
+    }
 
     // 9b. restore ellipses
     t = t.replace(/\u0001/g, "...");
@@ -252,16 +261,57 @@
     // 12. tidy spaces around newlines
     t = t.replace(/ +\n/g, "\n").replace(/\n +/g, "\n");
 
-    // 13. end multi-word text with a period if it ends on a bare word (or one wrapped in a paren/quote)
-    var trimmed = t.replace(/\s+$/g, "");
-    if (/\s/.test(trimmed) && /[a-z0-9][)"']?$/i.test(trimmed)) {
-      t = trimmed + "." + t.slice(trimmed.length);
-      fixes++;
-    } else {
-      t = trimmed + t.slice(trimmed.length);
-    }
-
     return { text: t, fixes: fixes };
+  }
+
+  // walk the rich text in visual lines: block elements and <br> split lines,
+  // bold/italic/underline pieces join the line they sit in
+  function eachLine(root, cb) {
+    var lines = [[]];
+    function walk(node) {
+      if (node.nodeType === 3) { lines[lines.length - 1].push(node); return; }
+      if (node.nodeType !== 1) return;
+      var tag = node.tagName;
+      if (tag === "SCRIPT" || tag === "STYLE") return;
+      if (tag === "BR") { lines.push([]); return; }
+      var block = /^(P|DIV|LI|H[1-6]|BLOCKQUOTE|TR)$/.test(tag);
+      if (block && lines[lines.length - 1].length) lines.push([]);
+      for (var i = 0; i < node.childNodes.length; i++) walk(node.childNodes[i]);
+      if (block) lines.push([]);
+    }
+    for (var i = 0; i < root.childNodes.length; i++) walk(root.childNodes[i]);
+    lines.forEach(function (line) { if (line.length) cb(line); });
+  }
+
+  // fix every text piece in place, leaving the bold/list markup untouched
+  function fixRich(root) {
+    var fixes = 0;
+    eachLine(root, function (nodes) {
+      var prev = "";
+      nodes.forEach(function (n) {
+        var orig = n.nodeValue;
+        if (!orig) return;
+        var atLineStart = prev.replace(/\s+$/, "") === "";
+        var afterSentence = /[.!?…]["')\]]?\s*$/.test(prev);
+        var res = fixInline(orig, atLineStart || afterSentence);
+        if (res.text !== orig) n.nodeValue = res.text;
+        fixes += res.fixes;
+        prev += res.text;
+      });
+      // end a multi-word line with a period if it stops on a bare word
+      var all = nodes.map(function (n) { return n.nodeValue; }).join("");
+      var trimmed = all.replace(/\s+$/g, "");
+      if (/\s/.test(trimmed) && /[a-z0-9][)"']?$/i.test(trimmed)) {
+        for (var i = nodes.length - 1; i >= 0; i--) {
+          if (/\S/.test(nodes[i].nodeValue)) {
+            nodes[i].nodeValue = nodes[i].nodeValue.replace(/\s+$/, "") + ".";
+            fixes++;
+            break;
+          }
+        }
+      }
+    });
+    return fixes;
   }
 
   // ---- paste: keep bold and lists ----
@@ -354,16 +404,17 @@
   });
 
   function run() {
-    var raw = input.innerText;
-    if (!raw.trim()) {
+    if (!input.textContent.trim()) {
       outCard.classList.remove("show");
       return;
     }
-    var res = fixText(raw);
-    output.textContent = res.text;
+    var work = input.cloneNode(true);
+    work.removeAttribute("id");
+    var fixes = fixRich(work);
+    output.innerHTML = work.innerHTML;
     outCard.classList.add("show");
     status.className = "";
-    status.textContent = res.fixes === 0 ? "already clean, no fixes needed" : res.fixes + (res.fixes === 1 ? " fix" : " fixes");
+    status.textContent = fixes === 0 ? "already clean, no fixes needed" : fixes + (fixes === 1 ? " fix" : " fixes");
     outCard.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }
 
@@ -396,7 +447,12 @@
 
   // demo mode for screenshots: open with #demo
   if (location.hash === "#demo") {
-    input.textContent = "the thing is   it seems good ,but i dont actually fw it.tbh the wifi framing is exactly right ,and the the site you open on every new network is the pitch .did you mean airport btw? go to site.com and see a apple a hour later";
+    input.innerHTML = '<div>this separation gives each part of the system a clear responsibility:</div>' +
+      '<ul><li><strong>spark</strong> handles data processing and establishes the facts.</li>' +
+      '<li><strong>the ai model</strong> interprets those findings ,and suggests possible actions.</li>' +
+      '<li><strong>the validator</strong> checks whether those suggestions are supported.dont skip this step</li>' +
+      '<li><strong>the user</strong> keeps control ,and the the executor carries it out</li></ul>' +
+      '<div>the principle was simple.never change your words ,just tidy them</div>';
     run();
   }
 })();
