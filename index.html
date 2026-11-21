@@ -40,10 +40,9 @@
     padding: 18px;
     box-shadow: 0 1px 3px rgba(20,20,40,0.05);
   }
-  textarea {
+  .editor {
     width: 100%;
     min-height: 170px;
-    resize: vertical;
     border: 1px solid var(--line);
     border-radius: 10px;
     padding: 14px;
@@ -51,8 +50,17 @@
     color: var(--ink);
     background: #fbfbfc;
     outline: none;
+    overflow-wrap: break-word;
   }
-  textarea:focus { border-color: var(--accent); background: #fff; }
+  #input:focus { border-color: var(--accent); background: #fff; }
+  #input:empty::before {
+    content: attr(data-placeholder);
+    color: #9a9aa2;
+    pointer-events: none;
+  }
+  .rich ul, .rich ol { padding-left: 22px; margin: 4px 0; }
+  .rich li { margin: 2px 0; }
+  .rich p { margin: 0 0 6px; }
 
   .row {
     display: flex;
@@ -117,7 +125,7 @@
   </header>
 
   <div class="card">
-    <textarea id="input" placeholder="paste your text here…" autofocus></textarea>
+    <div id="input" class="editor rich" contenteditable="true" data-placeholder="paste your text here…"></div>
     <div class="row">
       <button class="fix" id="fixBtn">Fix text</button>
       <button class="ghost" id="clearBtn">Clear</button>
@@ -126,7 +134,7 @@
 
   <div class="card" id="out-card">
     <div class="out-label">fixed text</div>
-    <div id="output"></div>
+    <div id="output" class="rich"></div>
     <div class="row">
       <button class="ghost" id="copyBtn">Copy</button>
       <div id="status"></div>
@@ -135,6 +143,7 @@
 
   <footer>
     fixes spacing, punctuation, capitalization and safe grammar slips (a/an, doubled words, missing apostrophes).<br>
+    bold, italics and bullet lists stay exactly as you pasted them.<br>
     it never rewords, rewrites or swaps your vocabulary. runs fully offline, nothing leaves this page.
   </footer>
 </div>
@@ -261,8 +270,16 @@
   var outCard = document.getElementById("out-card");
   var status = document.getElementById("status");
 
+  // an "empty" contenteditable can still hold a stray <br>; keep it truly
+  // empty so the placeholder shows
+  input.addEventListener("input", function () {
+    if (!input.textContent.replace(/\u00a0/g, "").trim() && !input.querySelector("ul, ol")) {
+      input.innerHTML = "";
+    }
+  });
+
   function run() {
-    var raw = input.value;
+    var raw = input.innerText;
     if (!raw.trim()) {
       outCard.classList.remove("show");
       return;
@@ -277,7 +294,7 @@
 
   document.getElementById("fixBtn").addEventListener("click", run);
   document.getElementById("clearBtn").addEventListener("click", function () {
-    input.value = "";
+    input.innerHTML = "";
     outCard.classList.remove("show");
     input.focus();
   });
@@ -304,7 +321,7 @@
 
   // demo mode for screenshots: open with #demo
   if (location.hash === "#demo") {
-    input.value = "the thing is   it seems good ,but i dont actually fw it.tbh the wifi framing is exactly right ,and the the site you open on every new network is the pitch .did you mean airport btw? go to site.com and see a apple a hour later";
+    input.textContent = "the thing is   it seems good ,but i dont actually fw it.tbh the wifi framing is exactly right ,and the the site you open on every new network is the pitch .did you mean airport btw? go to site.com and see a apple a hour later";
     run();
   }
 })();
