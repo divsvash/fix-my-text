@@ -424,24 +424,51 @@
     outCard.classList.remove("show");
     input.focus();
   });
+  // plain-text version for apps that don't take formatted text
+  function domToText(root) {
+    var out = "";
+    function walk(node) {
+      if (node.nodeType === 3) { out += node.nodeValue; return; }
+      if (node.nodeType !== 1) return;
+      var tag = node.tagName;
+      if (tag === "BR") { out += "\n"; return; }
+      if (tag === "LI") {
+        out += "- ";
+        for (var i = 0; i < node.childNodes.length; i++) walk(node.childNodes[i]);
+        out += "\n";
+        return;
+      }
+      var block = /^(P|DIV|H[1-6]|BLOCKQUOTE|UL|OL|TR)$/.test(tag);
+      for (var i = 0; i < node.childNodes.length; i++) walk(node.childNodes[i]);
+      if (block) out += "\n";
+    }
+    walk(root);
+    return out.replace(/\n{3,}/g, "\n\n").replace(/^\n+|\n+$/g, "");
+  }
+
   document.getElementById("copyBtn").addEventListener("click", function () {
-    var text = output.textContent;
+    var html = output.innerHTML;
     function done() {
       status.className = "ok";
       status.textContent = "copied ✓";
       setTimeout(function () { status.className = ""; }, 1800);
     }
     function fallback() {
-      var ta = document.createElement("textarea");
-      ta.value = text;
-      document.body.appendChild(ta);
-      ta.select();
+      var range = document.createRange();
+      range.selectNodeContents(output);
+      var sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
       document.execCommand("copy");
-      document.body.removeChild(ta);
+      sel.removeAllRanges();
       done();
     }
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).then(done, fallback);
+    if (navigator.clipboard && window.ClipboardItem) {
+      var item = new ClipboardItem({
+        "text/html": new Blob([html], { type: "text/html" }),
+        "text/plain": new Blob([domToText(output)], { type: "text/plain" })
+      });
+      navigator.clipboard.write([item]).then(done, fallback);
     } else { fallback(); }
   });
 
