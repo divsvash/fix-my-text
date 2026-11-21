@@ -142,6 +142,119 @@
 <script>
 (function () {
   "use strict";
+
+  // ---- correction engine: rule-based only, never changes word choice ----
+
+  var CONTRACTIONS = {
+    "dont":"don't","cant":"can't","wont":"won't","isnt":"isn't","arent":"aren't",
+    "wasnt":"wasn't","werent":"weren't","hasnt":"hasn't","havent":"haven't",
+    "hadnt":"hadn't","didnt":"didn't","doesnt":"doesn't","couldnt":"couldn't",
+    "shouldnt":"shouldn't","wouldnt":"wouldn't","mustnt":"mustn't","neednt":"needn't",
+    "im":"i'm","ive":"i've","ill":"i'll","id":"i'd",
+    "lets":"let's","thats":"that's","whats":"what's","heres":"here's","theres":"there's",
+    "hes":"he's","shes":"she's","youre":"you're","theyre":"they're","whos":"who's"
+  };
+  // note: its/it's and your/you're are left alone on purpose (ambiguous)
+
+  // an before vowel sounds; a before consonant sounds (incl. yoo/w- words spelled with a vowel)
+  var AN_EXCEPTIONS = /^(hour|hours|honest|honestly|honor|honors|honour|heir|heirs)\b/i;
+  var A_EXCEPTIONS = /^(university|universities|unicorn|unicorns|uniform|uniforms|union|unions|unique|unison|unit|units|united|universal|universe|user|users|usual|usually|utensil|utensils|ufo|ufos|europe|european|europeans|euro|euros|eulogy|ewe|ewes|one|once|oneself|one-time)\b/i;
+
+  // common domain endings: don't split these at the dot
+  var TLDS = {com:1,org:1,net:1,edu:1,gov:1,io:1,co:1,in:1,ai:1,app:1,dev:1,me:1,info:1,biz:1,us:1,uk:1,ca:1,au:1,xyz:1,site:1,online:1,store:1,tech:1,gg:1,tv:1,fm:1,ly:1,so:1,sh:1,to:1,cc:1,ml:1};
+
+  function matchCase(orig, repl) {
+    if (orig.charAt(0) === orig.charAt(0).toUpperCase()) {
+      return repl.charAt(0).toUpperCase() + repl.slice(1);
+    }
+    return repl;
+  }
+
+  function fixText(input) {
+    var fixes = 0;
+    var t = input.replace(/\r\n?/g, "\n");
+
+    // 1. collapse spaces/tabs, tidy line edges (keep paragraph breaks)
+    t = t.replace(/[^\S\n]+/g, " ");
+    t = t.replace(/ *\n */g, "\n");
+
+    // 2. collapse repeated punctuation (!!, ??, ,, ;;) and 4+ dots to an ellipsis
+    t = t.replace(/([!?;,])\1+/g, function (m, p) { fixes++; return p; });
+    t = t.replace(/\.{4,}/g, function () { fixes++; return "..."; });
+
+    // 2b. protect ellipses from the spacing/capitalization rules via a placeholder
+    t = t.replace(/\.\.\.|…/g, "\u0001");
+
+    // 3. no space before punctuation
+    t = t.replace(/ +([,.!?;:%])/g, function (m, p) { fixes++; return p; });
+
+    // 4. one space after , ; : ! ? when jammed against a word/quote
+    t = t.replace(/([,;:!?])(?=[^\s\d"'\)\]\}!?,;:.%])/g, function (m, p) { fixes++; return p + " "; });
+
+    // 5. split jammed sentences at a period: "fine.they" -> "fine. they"
+    //    skips emails/domains by checking the part after the dot
+    t = t.replace(/\b([A-Za-z]{2,})\.([A-Za-z]{2,})\b/g, function (m, a, b) {
+      if (TLDS[b.toLowerCase()]) return m;   // site.com etc
+      fixes++;
+      return a + ". " + b;
+    });
+
+    // 5b. space after an ellipsis jammed against a word: "...what" -> "... what"
+    t = t.replace(/\u0001(?=[A-Za-z])/g, function () { fixes++; return "\u0001 "; });
+
+    // 6. parens spacing: "word(word" -> "word (word", ")word" -> ") word" (also after quotes/digits)
+    t = t.replace(/([A-Za-z0-9"'!?.,])\(/g, function (m, c) { fixes++; return c + " ("; });
+    t = t.replace(/\)([A-Za-z0-9"'])/g, function (m, c) { fixes++; return ") " + c; });
+
+    // 7. contractions: missing apostrophes (unambiguous only)
+    t = t.replace(/\b([A-Za-z]+)\b/g, function (m, w) {
+      var repl = CONTRACTIONS[w.toLowerCase()];
+      if (repl) { fixes++; return matchCase(w, repl); }
+      return m;
+    });
+
+    // 8. standalone lowercase i -> I
+    t = t.replace(/(^|[\s("'])i(?=[\s,.!?'")]|$)/gm, function (m, pre) { fixes++; return pre + "I"; });
+
+    // 9. capitalize first letter of each sentence / line
+    t = t.replace(/(^|[.!?…]\s+|\n+)(\(?["']?)([a-z])/g, function (m, pre, q, ch) {
+      fixes++;
+      return pre + q + ch.toUpperCase();
+    });
+
+    // 9b. restore ellipses
+    t = t.replace(/\u0001/g, "...");
+
+    // 10. a/an agreement
+    t = t.replace(/\b(a|A) ([A-Za-z]+)/g, function (m, a, next) {
+      var needAn = (/^[aeiou]/i.test(next) && !A_EXCEPTIONS.test(next)) || AN_EXCEPTIONS.test(next);
+      if (needAn) { fixes++; return (a === "A" ? "An" : "an") + " " + next; }
+      return m;
+    });
+    t = t.replace(/\b(an|An) ([A-Za-z]+)/g, function (m, an, next) {
+      var vowelSound = (/^[aeiou]/i.test(next) && !A_EXCEPTIONS.test(next)) || AN_EXCEPTIONS.test(next);
+      if (!vowelSound) { fixes++; return (an === "An" ? "A" : "a") + " " + next; }
+      return m;
+    });
+
+    // 11. doubled words: "the the" -> "the"
+    t = t.replace(/\b([A-Za-z']+)([ \t]+\1\b)+/gi, function (m, w) { fixes++; return w; });
+
+    // 12. tidy spaces around newlines
+    t = t.replace(/ +\n/g, "\n").replace(/\n +/g, "\n");
+
+    // 13. end multi-word text with a period if it ends on a bare word (or one wrapped in a paren/quote)
+    var trimmed = t.replace(/\s+$/g, "");
+    if (/\s/.test(trimmed) && /[a-z0-9][)"']?$/i.test(trimmed)) {
+      t = trimmed + "." + t.slice(trimmed.length);
+      fixes++;
+    } else {
+      t = trimmed + t.slice(trimmed.length);
+    }
+
+    return { text: t, fixes: fixes };
+  }
+
 })();
 </script>
 </body>
